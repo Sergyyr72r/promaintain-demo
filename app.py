@@ -429,10 +429,43 @@ else:
                 k2.metric("Gesamtkosten (Materialwert)", f"{total_cost:,.0f} €")
                 k3.metric("Ø Preis / m³", f"{avg_price:.2f} €")
                 st.markdown("---")
-                df_proj_logs = get_data("SELECT user_name, hours FROM work_logs WHERE project_name = ?", (selected_project,))
-                if not df_proj_logs.empty:
-                    chart_data = df_proj_logs.groupby('user_name')['hours'].sum().reset_index()
-                    st.plotly_chart(px.bar(chart_data, x='user_name', y='hours', title=f"Stunden pro Mitarbeiter ({selected_project})"), use_container_width=True)
+                
+                # DATA FETCH FOR CHARTS
+                log_data = get_data("SELECT user_name, scaffold_number, hours FROM work_logs WHERE project_name = ?", (selected_project,))
+                
+                if not log_data.empty:
+                    c_chart1, c_chart2 = st.columns(2)
+                    
+                    with c_chart1:
+                        # Bar Chart: User Hours
+                        bar_data = log_data.groupby('user_name')['hours'].sum().reset_index()
+                        fig_bar = px.bar(bar_data, x='user_name', y='hours', title="Stunden pro Mitarbeiter", color='hours', color_continuous_scale='Blues')
+                        st.plotly_chart(fig_bar, use_container_width=True)
+                        
+                    with c_chart2:
+                        # Pie Chart: Scaffold Hours (Group small slices)
+                        pie_data = log_data.groupby('scaffold_number')['hours'].sum().reset_index()
+                        
+                        # --- LOGIC FOR "SONSTIGE" ---
+                        total_h = pie_data['hours'].sum()
+                        if total_h > 0:
+                            threshold = 0.03 * total_h # 3%
+                            
+                            main_data = pie_data[pie_data['hours'] >= threshold]
+                            small_data = pie_data[pie_data['hours'] < threshold]
+                            
+                            if not small_data.empty:
+                                other_sum = small_data['hours'].sum()
+                                other_row = pd.DataFrame({'scaffold_number': ['Sonstige'], 'hours': [other_sum]})
+                                pie_data_final = pd.concat([main_data, other_row], ignore_index=True)
+                            else:
+                                pie_data_final = main_data
+                                
+                            fig_pie = px.pie(pie_data_final, values='hours', names='scaffold_number', 
+                                             title="Stundenverteilung (Top Gerüste)", hole=0.4)
+                            st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.info("Keine Arbeitsstunden für dieses Projekt gebucht.")
 
         # TAB 2: Workers
         with tab2:
@@ -606,7 +639,6 @@ else:
                             conn.close()
                             
                             st.session_state['import_logs'] = logs
-                            st.session_state['import_success_msg'] = "Import erfolgreich!"
                             st.rerun()
                             
                     except Exception as e:
@@ -614,6 +646,9 @@ else:
                         st.error(f"Kritischer Fehler: {e}")
 
             if 'import_logs' in st.session_state:
-                st.success(st.session_state.get('import_success_msg', 'Fertig.'))
+                with st.expander("🔍 Detaillierte Import-Logs", expanded=True):
+                    st.text("\n".join(st.session_state['import_logs']))
+                if st.button("Logs schließen"):
+                    del st.session_state['import_logs']; st.rerun()
 
 st.markdown("""<div class="footer"><p>Sergey Romanov, 2025 | Developed for promaintain®</p></div>""", unsafe_allow_html=True)
